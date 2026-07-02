@@ -148,18 +148,6 @@ prometheus-node-exporter:
 | :---------------------------------------------------- | :------------------------------------- |
 | registry.k8s.io/kube-state-metrics/kube-state-metrics | docker.io/k8smirror/kube-state-metrics |
 
-### 注意 distroless 镜像变体（chart 85+）
-
-:::warning[chart 85+ 默认启用 distroless 镜像]
-
-从 chart **85.x** 起，`prometheus` 和 `prometheus-node-exporter` 默认使用 **distroless** 变体镜像，tag 会带 `-distroless` 后缀（如 `v3.13.0-distroless`）。
-
-如果使用 TKE 内网 mirror（`quay.tencentcloudcr.com`）直接替换 registry，**无需关心此问题**——上游仓库本身就包含 distroless 变体，直接拉取即可。
-
-只有当你把镜像同步到自建仓库（如 DockerHub mirror）时，才需要确保同步规则覆盖了 `-distroless` 后缀的 tag，否则会拉不到镜像。
-
-:::
-
 ## 配置 Grafana
 
 grafana 是 `kube-prometheus-stack` 的一个 subchart，所有 grafana 配置放在 `grafana` 字段下：
