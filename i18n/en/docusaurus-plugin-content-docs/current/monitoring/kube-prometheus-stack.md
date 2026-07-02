@@ -165,7 +165,7 @@ Run `kubectl get pod -A -o wide` to check Pod IPs: if they are in the node's VPC
 
 ### Native Mode: Replacing the certgen Image
 
-When the webhook is enabled, the certgen job needs to pull the `kube-webhook-certgen` image. In newer chart versions (e.g., 87.x), this image defaults to `ghcr.io/jkroepke/kube-webhook-certgen`, which domestic clusters usually cannot pull, so it must be replaced with a reachable DockerHub mirror:
+When the webhook is enabled, the certgen job needs to pull the `kube-webhook-certgen` image. In newer chart versions (e.g., 87.x), this image defaults to `ghcr.io/jkroepke/kube-webhook-certgen`, and domestic clusters usually cannot pull from `ghcr.io`. Fortunately, the image maintainer [jkroepke](https://github.com/jkroepke/kube-webhook-certgen) also publishes to DockerHub, so simply changing the registry to `docker.io` works (the tag matches the chart default, no change needed):
 
 ```yaml title="image-values.yaml"
 prometheusOperator:
@@ -173,13 +173,13 @@ prometheusOperator:
     patch:
       image:
         registry: docker.io
-        repository: dyrnq/kube-webhook-certgen
-        tag: "v1.4.4"
+        repository: jkroepke/kube-webhook-certgen
+        tag: "1.8.4"
 ```
 
-:::warning[Always Verify Image Reachability First]
+:::tip[Prefer the Official Image, and Verify Reachability]
 
-There are many community mirror versions of the certgen image with inconsistent tag naming (some with a `v` prefix, some without). After selecting one, be sure to verify that nodes can pull it using the [temporary Pod method above](#replacing-image-addresses-for-domestic-environments) — a non-existent tag on DockerHub will cause the accelerator's origin fallback to time out, leaving the certgen job stuck and the operator perpetually not ready. `docker.io/dyrnq/kube-webhook-certgen:v1.4.4` has been verified to be pullable on TKE nodes.
+`docker.io/jkroepke/kube-webhook-certgen` is the official DockerHub publication by the same author as the chart's default image, which is more reliable than third-party community mirrors. Its tags match the `ghcr.io` versions (in this example `1.8.4` is the chart 87.3.0 default). After replacing, it's still recommended to verify that nodes can pull it using the [temporary Pod method above](#replacing-image-addresses-for-domestic-environments) — a non-existent tag on DockerHub will cause the accelerator's origin fallback to time out, leaving the certgen job stuck and the operator perpetually not ready. `docker.io/jkroepke/kube-webhook-certgen:1.8.4` has been verified to be pullable on TKE nodes.
 
 :::
 

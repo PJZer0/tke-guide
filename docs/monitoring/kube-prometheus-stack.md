@@ -161,7 +161,7 @@ Prometheus Operator 默认启用 admission webhooks，用于校验 `PrometheusRu
 
 ### Native 模式：替换 certgen 镜像
 
-启用 webhook 时，certgen job 需要拉取 `kube-webhook-certgen` 镜像。新版 chart（如 87.x）该镜像默认来自 `ghcr.io/jkroepke/kube-webhook-certgen`，国内集群通常拉不到，需替换为可达的 DockerHub mirror：
+启用 webhook 时，certgen job 需要拉取 `kube-webhook-certgen` 镜像。新版 chart（如 87.x）该镜像默认来自 `ghcr.io/jkroepke/kube-webhook-certgen`，国内集群通常拉不到 `ghcr.io`。好在该镜像的维护者 [jkroepke](https://github.com/jkroepke/kube-webhook-certgen) 同时发布到了 DockerHub，将 registry 改为 `docker.io` 即可（tag 与 chart 默认一致，无需改动）：
 
 ```yaml title="image-values.yaml"
 prometheusOperator:
@@ -169,13 +169,13 @@ prometheusOperator:
     patch:
       image:
         registry: docker.io
-        repository: dyrnq/kube-webhook-certgen
-        tag: "v1.4.4"
+        repository: jkroepke/kube-webhook-certgen
+        tag: "1.8.4"
 ```
 
-:::warning[务必先验证镜像可达]
+:::tip[优先用官方镜像，并验证可达性]
 
-certgen 镜像的社区 mirror 版本较多且 tag 命名不一（有的带 `v` 前缀有的不带）。选定后请务必用[前文的临时 Pod 方法](#国内环境替换镜像地址)验证节点能否拉取——DockerHub 上不存在的 tag 会导致加速器回源超时，certgen job 卡住后 operator 也会一直无法就绪。`docker.io/dyrnq/kube-webhook-certgen:v1.4.4` 经验证在 TKE 节点可拉取。
+`docker.io/jkroepke/kube-webhook-certgen` 是 chart 默认镜像作者的官方 DockerHub 发布，比第三方社区 mirror 更可靠。其 tag 与 `ghcr.io` 版本一致（本例 `1.8.4` 即 chart 87.3.0 默认版本）。替换后仍建议用[前文的临时 Pod 方法](#国内环境替换镜像地址)验证节点能否拉取——DockerHub 上不存在的 tag 会导致加速器回源超时，certgen job 卡住后 operator 也会一直无法就绪。`docker.io/jkroepke/kube-webhook-certgen:1.8.4` 经验证在 TKE 节点可拉取。
 
 :::
 
