@@ -19,3 +19,6 @@ package-lock.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# JetBrains 个人 import 配置(非共享)
+.idea/go.imports.xml
