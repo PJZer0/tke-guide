@@ -106,10 +106,23 @@ prometheus-node-exporter:
 
 部分不在 `quay.io` 上的镜像可替换为 DockerHub 上的社区 mirror：
 
-| 原始镜像                                               | DockerHub mirror 镜像                                  |
-| :---------------------------------------------------- | :----------------------------------------------------- |
-| registry.k8s.io/kube-state-metrics/kube-state-metrics | docker.io/k8smirror/kube-state-metrics                 |
-| registry.k8s.io/ingress-nginx/kube-webhook-certgen    | docker.io/k8smirror/ingress-nginx-kube-webhook-certgen |
+| 原始镜像                                              | DockerHub mirror 镜像                  |
+| :---------------------------------------------------- | :------------------------------------- |
+| registry.k8s.io/kube-state-metrics/kube-state-metrics | docker.io/k8smirror/kube-state-metrics |
+
+:::tip[验证镜像在集群内是否可达]
+
+不同集群节点的镜像加速配置不同（如 TKE 节点通常将 `docker.io` 指向内网加速器 `mirror.ccs.tencentyun.com`）。选定 mirror 镜像后，建议先用一个临时 Pod 验证节点能否拉取，避免安装时才发现镜像不可达：
+
+```bash
+kubectl run img-test --image=docker.io/xxx/yyy:tag --restart=Never --command -- true
+kubectl describe pod img-test | grep -A5 Events   # 看到 "Successfully pulled" 即可达
+kubectl delete pod img-test
+```
+
+只要镜像**确实存在于 DockerHub**，通过内网加速器即可拉取；若镜像在 DockerHub 上不存在，加速器回源会超时（`i/o timeout`）而非快速报错，容易误判。
+
+:::
 
 ## 配置 Grafana
 
@@ -131,36 +144,56 @@ grafana:
 
 具体配置建议参考 [在 TKE 上自建 Grafana](./grafana)。
 
-## 在自建 Cilium Overlay 集群中的特殊配置
+## Admission Webhooks 配置
 
-:::warning[Overlay 模式的 Webhook 兼容性问题]
+Prometheus Operator 默认启用 admission webhooks，用于校验 `PrometheusRule` 等 CRD 的语法（例如提前拦截错误的告警规则表达式）。webhook 的 TLS 证书由 chart 自带的 certgen job 自动生成到 `kube-prometheus-stack-admission` Secret，供 operator 挂载使用。
 
-在 TKE 自建 Cilium Overlay 模式的托管集群中，apiserver 运行在管控面（无 cilium-agent），无法路由到 overlay Pod IP（如 `10.244.x.x`）。这导致 apiserver 调用 ValidatingWebhook / MutatingWebhook 时连接超时。
+**是否需要禁用 webhook，取决于集群的网络模式**：
 
-详见 [安装 Cilium FAQ - Overlay 模式下 Webhook 连接超时](../networking/cilium/install.md#overlay-模式下-webhookvalidatingmutating连接超时)。
+- **Cilium Native（VPC-CNI）模式**：Pod IP 是真实 VPC IP，apiserver 可直接路由到 Pod，webhook 能正常工作，**无需禁用**，只需处理 certgen 镜像即可（见下文）。
+- **Cilium Overlay 模式**：apiserver 运行在管控面（无 cilium-agent），无法路由到 overlay Pod IP（如 `10.244.x.x`），apiserver 调用 webhook 会连接超时，**建议禁用**（见下文）。详见 [安装 Cilium FAQ - Overlay 模式下 Webhook 连接超时](../networking/cilium/install.md#overlay-模式下-webhookvalidatingmutating连接超时)。
+
+:::tip[如何判断自己是哪种模式]
+
+`kubectl get pod -A -o wide` 查看 Pod IP：若是节点所在 VPC 网段（如 `10.10.x.x`）则为 Native 模式；若是独立的 overlay 网段（如 `10.244.x.x`）则为 Overlay 模式。三种架构的区分详见 [Cilium 概述](../networking/cilium/overview.md)。
 
 :::
 
-### 禁用 Admission Webhooks
+### Native 模式：替换 certgen 镜像
 
-`kube-prometheus-stack` 的 Prometheus Operator 默认启用 admission webhooks，其 certgen job 需要拉取额外镜像（如 `kube-webhook-certgen`），且 webhook 服务本身也会遇到上述 overlay 不可达问题。建议在 Overlay 模式下禁用：
+启用 webhook 时，certgen job 需要拉取 `kube-webhook-certgen` 镜像。新版 chart（如 87.x）该镜像默认来自 `ghcr.io/jkroepke/kube-webhook-certgen`，国内集群通常拉不到，需替换为可达的 DockerHub mirror：
+
+```yaml title="image-values.yaml"
+prometheusOperator:
+  admissionWebhooks:
+    patch:
+      image:
+        registry: docker.io
+        repository: dyrnq/kube-webhook-certgen
+        tag: "v1.4.4"
+```
+
+:::warning[务必先验证镜像可达]
+
+certgen 镜像的社区 mirror 版本较多且 tag 命名不一（有的带 `v` 前缀有的不带）。选定后请务必用[前文的临时 Pod 方法](#国内环境替换镜像地址)验证节点能否拉取——DockerHub 上不存在的 tag 会导致加速器回源超时，certgen job 卡住后 operator 也会一直无法就绪。`docker.io/dyrnq/kube-webhook-certgen:v1.4.4` 经验证在 TKE 节点可拉取。
+
+:::
+
+### Overlay 模式：禁用 Admission Webhooks
+
+Overlay 模式下 webhook 不可达，建议禁用。**注意：仅设置 `admissionWebhooks.enabled: false` 会导致 operator Pod 卡在 `ContainerCreating`**——因为 operator 的 TLS 开关（`prometheusOperator.tls.enabled`）默认独立为 `true`，deployment 仍会挂载 `kube-prometheus-stack-admission` Secret，而禁用 webhook 后已没有 certgen job 去生成该 Secret。正确做法是**同时关闭 operator 的 TLS**：
 
 ```yaml title="grafana-values.yaml"
 prometheusOperator:
   admissionWebhooks:
     enabled: false
+  # highlight-add-start
+  tls:
+    enabled: false
+  # highlight-add-end
 ```
 
-禁用后，operator 的 deployment 仍会引用 `kube-prometheus-stack-admission` TLS Secret 作为 volume。需手动创建一个自签名证书 Secret：
-
-```bash
-openssl req -x509 -newkey rsa:2048 -keyout /tmp/tls.key -out /tmp/tls.crt \
-  -days 365 -nodes -subj "/CN=kube-prometheus-stack-operator"
-
-kubectl -n monitoring create secret generic kube-prometheus-stack-admission \
-  --from-file=cert=/tmp/tls.crt \
-  --from-file=key=/tmp/tls.key
-```
+关闭 `tls.enabled` 后，operator 不再监听 HTTPS、不再挂载证书 Secret，也就不存在缺失 Secret 的问题，无需手动创建任何证书。
 
 ### cert-manager Webhook
 
@@ -244,9 +277,15 @@ kubectl -n monitoring get secret kube-prometheus-stack-grafana \
 1. 镜像 tag 是否与 chart 版本对应的 app 版本一致
 2. 镜像仓库是否在集群节点上可达（参考[国内环境替换镜像地址](#国内环境替换镜像地址)）
 
-### Prometheus Operator CrashLoopBackOff？
+### Prometheus Operator 卡在 ContainerCreating？
 
-如果禁用了 admission webhooks 但未创建 `kube-prometheus-stack-admission` Secret，operator 会因缺少 TLS 证书文件而启动失败。参考[禁用 Admission Webhooks](#禁用-admission-webhooks)章节创建 Secret。
+`kubectl describe pod` 若看到 `MountVolume.SetUp failed for volume "tls-secret" : secret "kube-prometheus-stack-admission" not found`，说明禁用了 `admissionWebhooks.enabled` 但没有同步关闭 `prometheusOperator.tls.enabled`。此时 operator 仍要挂载 admission 证书 Secret，而该 Secret 已无 certgen job 生成。
+
+解决办法是同时关闭 operator 的 TLS，参考 [Overlay 模式：禁用 Admission Webhooks](#overlay-模式禁用-admission-webhooks)。
+
+### certgen job 卡住导致 operator 无法就绪？
+
+启用 webhook 时，若 `kube-prometheus-stack-admission-create` job 一直拉不到 `kube-webhook-certgen` 镜像，admission Secret 就不会生成，operator 也会一直卡在 `ContainerCreating`。参考 [Native 模式：替换 certgen 镜像](#native-模式替换-certgen-镜像) 替换为可达镜像。
 
 ### Grafana sidecar CrashLoopBackOff？
 
