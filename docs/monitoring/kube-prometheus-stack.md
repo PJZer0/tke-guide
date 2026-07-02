@@ -31,6 +31,45 @@ helm upgrade --install kube-prometheus-stack prom/kube-prometheus-stack \
 
 :::
 
+## 跨版本升级时更新 CRD
+
+:::warning[跨大版本升级必须先更新 CRD]
+
+`kube-prometheus-stack` 的每个大版本（如 80→81、86→87）通常伴随 Prometheus Operator 升级，CRD 也会更新。Helm 默认不更新已安装的 CRD，需要手动处理，否则升级后 Operator 可能无法识别新字段。
+
+:::
+
+chart 提供了 `crds.upgradeJob` 选项（v68.4.0+），启用后会在安装/升级时自动通过 Helm hook 更新 CRD：
+
+```yaml title="image-values.yaml"
+crds:
+  upgradeJob:
+    enabled: true
+    # 若 CRD 已被 ArgoCD 等 GitOps 工具用 SSA 管理，需要强制覆盖冲突字段
+    forceConflicts: true
+    image:
+      kubectl:
+        # 默认从 registry.k8s.io 拉取 kubectl，国内可替换为 mirror
+        registry: docker.io
+        repository: k8smirror/kubectl
+        # tag 默认为 "v" + K8s 版本，mirror 仓库可能无对应 tag，按需指定
+        tag: "1.33.4"
+```
+
+:::tip[forceConflicts 的使用场景]
+
+如果集群使用 ArgoCD 等 GitOps 工具管理，CRD 会被 ArgoCD 的 SSA（Server-Side Apply）接管。此时 upgradeJob 的 `kubectl apply --server-side` 会与 `argocd-controller` 发生字段冲突。设置 `forceConflicts: true` 可让 kubectl 强制覆盖冲突字段，完成 CRD 升级。
+
+:::
+
+如果不使用 upgradeJob，也可以手动 apply 最新 CRD：
+
+```bash
+# 替换 <version> 为目标 Prometheus Operator 版本
+kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/<version>/example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml
+# 其余 CRD 同理
+```
+
 ## 自定义配置的方法
 
 `kube-prometheus-stack` chart 非常庞大，配置项极多。建议将自定义配置拆分为多个 `values.yaml` 文件分别维护，安装时指定多个 `-f` 参数：
@@ -54,7 +93,7 @@ helmCharts:
   releaseName: kube-prometheus-stack
   namespace: monitoring
   includeCRDs: true
-  version: "80.14.4"
+  version: "87.5.1" # 按需替换为最新版本
   additionalValuesFiles:
   - image-values.yaml
   - grafana-values.yaml
@@ -109,6 +148,38 @@ prometheus-node-exporter:
 | 原始镜像                                              | DockerHub mirror 镜像                  |
 | :---------------------------------------------------- | :------------------------------------- |
 | registry.k8s.io/kube-state-metrics/kube-state-metrics | docker.io/k8smirror/kube-state-metrics |
+
+### 注意 distroless 镜像变体（chart 85+）
+
+:::warning[chart 85+ 默认启用 distroless 镜像]
+
+从 chart **85.x** 起，`prometheus` 和 `prometheus-node-exporter` 默认使用 **distroless** 变体镜像，tag 会带 `-distroless` 后缀（如 `v3.13.0-distroless`）。
+
+如果你的镜像 mirror 方案是**按 tag 同步**（如通过 [registry-sync](https://github.com/docker-hub/registry-sync) 按 tag 正则过滤），`-distroless` 后缀的 tag 通常不会被默认正则匹配，导致升级后镜像拉取失败。
+
+:::
+
+两种解决方式：
+
+**方式一：显式指定非 distroless tag（推荐，改动最小）**
+
+在 `image-values.yaml` 中为受影响的镜像显式指定非 distroless tag，或关闭 distroless 开关：
+
+```yaml title="image-values.yaml"
+prometheus:
+  prometheusSpec:
+    image:
+      # 显式指定非 distroless tag（与 mirror 仓库中已有的 tag 对齐）
+      tag: v3.13.0
+prometheus-node-exporter:
+  image:
+    # 父 chart 默认设置 distroless: true，显式关闭
+    distroless: false
+```
+
+**方式二：同步 distroless 镜像到 mirror 仓库**
+
+在镜像同步配置中增加对 `-distroless` 后缀 tag 的匹配，使 mirror 仓库包含 distroless 变体。
 
 ## 配置 Grafana
 
