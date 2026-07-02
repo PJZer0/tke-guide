@@ -49,11 +49,10 @@ crds:
     forceConflicts: true
     image:
       kubectl:
-        # 默认从 registry.k8s.io 拉取 kubectl，国内可替换为 mirror
+        # 默认从 registry.k8s.io 拉取 kubectl，国内需替换为 mirror
+        # tag 默认为 "v" + K8s 版本（如 v1.34.1），继承 chart 默认即可
         registry: docker.io
         repository: k8smirror/kubectl
-        # tag 默认为 "v" + K8s 版本，mirror 仓库可能无对应 tag，按需指定
-        tag: "1.33.4"
 ```
 
 :::tip[forceConflicts 的使用场景]
@@ -155,31 +154,11 @@ prometheus-node-exporter:
 
 从 chart **85.x** 起，`prometheus` 和 `prometheus-node-exporter` 默认使用 **distroless** 变体镜像，tag 会带 `-distroless` 后缀（如 `v3.13.0-distroless`）。
 
-如果你的镜像 mirror 方案是**按 tag 同步**（如通过 [registry-sync](https://github.com/docker-hub/registry-sync) 按 tag 正则过滤），`-distroless` 后缀的 tag 通常不会被默认正则匹配，导致升级后镜像拉取失败。
+如果使用 TKE 内网 mirror（`quay.tencentcloudcr.com`）直接替换 registry，**无需关心此问题**——上游仓库本身就包含 distroless 变体，直接拉取即可。
+
+只有当你把镜像同步到自建仓库（如 DockerHub mirror）时，才需要确保同步规则覆盖了 `-distroless` 后缀的 tag，否则会拉不到镜像。
 
 :::
-
-两种解决方式：
-
-**方式一：显式指定非 distroless tag（推荐，改动最小）**
-
-在 `image-values.yaml` 中为受影响的镜像显式指定非 distroless tag，或关闭 distroless 开关：
-
-```yaml title="image-values.yaml"
-prometheus:
-  prometheusSpec:
-    image:
-      # 显式指定非 distroless tag（与 mirror 仓库中已有的 tag 对齐）
-      tag: v3.13.0
-prometheus-node-exporter:
-  image:
-    # 父 chart 默认设置 distroless: true，显式关闭
-    distroless: false
-```
-
-**方式二：同步 distroless 镜像到 mirror 仓库**
-
-在镜像同步配置中增加对 `-distroless` 后缀 tag 的匹配，使 mirror 仓库包含 distroless 变体。
 
 ## 配置 Grafana
 
