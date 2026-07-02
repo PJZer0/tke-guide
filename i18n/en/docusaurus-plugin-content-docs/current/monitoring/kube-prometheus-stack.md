@@ -35,6 +35,44 @@ After selecting a chart version, the image tags in `image-values.yaml` must matc
 
 :::
 
+## Updating CRDs When Upgrading Across Versions
+
+:::warning[CRDs Must Be Updated First for Major Version Upgrades]
+
+Each major version of `kube-prometheus-stack` (e.g., 80→81, 86→87) is usually accompanied by a Prometheus Operator upgrade, and the CRDs are also updated. Helm does not update installed CRDs by default, so this must be handled manually — otherwise the Operator may fail to recognize new fields after the upgrade.
+
+:::
+
+The chart provides the `crds.upgradeJob` option (v68.4.0+). When enabled, it automatically updates CRDs via a Helm hook during installation/upgrade:
+
+```yaml title="image-values.yaml"
+crds:
+  upgradeJob:
+    enabled: true
+    # If CRDs are already managed via SSA by GitOps tools like ArgoCD, conflicting fields must be force-overwritten
+    forceConflicts: true
+    image:
+      kubectl:
+        # kubectl is pulled from registry.k8s.io by default; replace with a mirror for domestic environments
+        # The tag defaults to "v" + the K8s version (e.g., v1.34.1); inheriting the chart default is fine
+        registry: docker.io
+        repository: k8smirror/kubectl
+```
+
+:::tip[When to Use forceConflicts]
+
+If the cluster is managed by GitOps tools like ArgoCD, the CRDs are taken over by ArgoCD's SSA (Server-Side Apply). In this case, the upgradeJob's `kubectl apply --server-side` will conflict with the `argocd-controller` on certain fields. Setting `forceConflicts: true` lets kubectl force-overwrite the conflicting fields to complete the CRD upgrade.
+
+:::
+
+If you prefer not to use upgradeJob, you can also manually apply the latest CRDs:
+
+```bash
+# Replace <version> with the target Prometheus Operator version
+kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/<version>/example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml
+# Apply the remaining CRDs similarly
+```
+
 ## Custom Configuration Methods
 
 The `kube-prometheus-stack` chart is very large with numerous configuration options. It is recommended to split custom configurations into multiple `values.yaml` files for separate maintenance, and specify multiple `-f` parameters during installation:
@@ -58,7 +96,7 @@ helmCharts:
   releaseName: kube-prometheus-stack
   namespace: monitoring
   includeCRDs: true
-  version: "80.14.4"
+  version: "87.5.1" # replace with the latest version as needed
   additionalValuesFiles:
   - image-values.yaml
   - grafana-values.yaml
