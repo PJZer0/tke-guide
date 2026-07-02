@@ -114,26 +114,6 @@ Some images not on `quay.io` can be replaced with community mirrors on DockerHub
 | :---------------------------------------------------- | :------------------------------------- |
 | registry.k8s.io/kube-state-metrics/kube-state-metrics | docker.io/k8smirror/kube-state-metrics |
 
-:::tip[Verify Image Reachability Within the Cluster]
-
-Different clusters configure image acceleration differently on their nodes (e.g., TKE nodes typically point `docker.io` to the internal accelerator `mirror.ccs.tencentyun.com`). After choosing a mirror image, it's recommended to verify that nodes can pull it using a temporary Pod, to avoid discovering unreachable images only at install time:
-
-```bash
-kubectl run img-test --image=docker.io/xxx/yyy:tag --restart=Never --command -- true
-kubectl describe pod img-test | grep -A5 Events   # "Successfully pulled" means reachable
-kubectl delete pod img-test
-```
-
-As long as the image **actually exists on DockerHub**, it can be pulled via the internal accelerator. If the image/tag does not exist on DockerHub, the accelerator's fallback to the origin will time out (`i/o timeout`) rather than fail fast, which is easy to misdiagnose.
-
-:::
-
-:::tip[Override Only the registry, Omit the tag When Possible]
-
-When replacing images, prefer overriding only the `registry` (and `repository` if needed) while **omitting the `tag`**, so the image version inherits the chart default. This way, image versions automatically follow chart upgrades without manually aligning tags (hardcoded tags tend to drift from the chart default). The prerequisite is that your mirror repository has synced the chart's default tag — just verify with the temporary Pod method above after replacing.
-
-:::
-
 ## Configuring Grafana
 
 Grafana is a subchart of `kube-prometheus-stack`. All Grafana configurations are placed under the `grafana` field:
@@ -172,13 +152,11 @@ prometheusOperator:
         registry: docker.io
 ```
 
-After replacing, verify that nodes can pull it using the [temporary Pod method above](#replacing-image-addresses-for-domestic-environments).
-
 ### Overlay Clusters: Disabling Admission Webhooks
 
 :::warning[Only Needed for Overlay-Networked Clusters]
 
-"Overlay" here refers to scenarios where **the apiserver cannot route directly to Pod IPs**, typically: **self-managed Cilium Overlay** or **productized Cilium Overlay (VPC-CNI non-shared-ENI Overlay mode)** managed clusters — the apiserver runs on the control plane and cannot route to overlay Pod IPs (e.g., `10.244.x.x`), so calls to the webhook time out.
+"Overlay" here refers to scenarios where **the apiserver cannot route directly to Pod IPs**, typically: **self-managed Cilium Overlay** or **productized Cilium Overlay** managed clusters — the apiserver runs on the control plane and cannot route to overlay Pod IPs (e.g., `10.244.x.x`), so calls to the webhook time out.
 
 Ordinary TKE clusters (where Pod IPs are real VPC IPs and the apiserver can reach Pods directly) **do not need** the configuration in this section — just enable the webhook normally as above.
 

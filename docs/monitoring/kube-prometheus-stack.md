@@ -110,26 +110,6 @@ prometheus-node-exporter:
 | :---------------------------------------------------- | :------------------------------------- |
 | registry.k8s.io/kube-state-metrics/kube-state-metrics | docker.io/k8smirror/kube-state-metrics |
 
-:::tip[验证镜像在集群内是否可达]
-
-不同集群节点的镜像加速配置不同（如 TKE 节点通常将 `docker.io` 指向内网加速器 `mirror.ccs.tencentyun.com`）。选定 mirror 镜像后，建议先用一个临时 Pod 验证节点能否拉取，避免安装时才发现镜像不可达：
-
-```bash
-kubectl run img-test --image=docker.io/xxx/yyy:tag --restart=Never --command -- true
-kubectl describe pod img-test | grep -A5 Events   # 看到 "Successfully pulled" 即可达
-kubectl delete pod img-test
-```
-
-只要镜像**确实存在于 DockerHub**，通过内网加速器即可拉取；若镜像在 DockerHub 上不存在，加速器回源会超时（`i/o timeout`）而非快速报错，容易误判。
-
-:::
-
-:::tip[尽量只覆盖 registry，省略 tag]
-
-替换镜像时优先只覆盖 `registry`（必要时含 `repository`），**省略 `tag`**，让镜像版本自动继承 chart 默认值。这样 chart 升级时镜像版本会自动跟随，无需手动对齐 tag（写死 tag 容易与 chart 默认版本脱节）。前提是所用 mirror 仓库已同步 chart 默认的对应 tag——替换后用上面的临时 Pod 方法验证一下即可。
-
-:::
-
 ## 配置 Grafana
 
 grafana 是 `kube-prometheus-stack` 的一个 subchart，所有 grafana 配置放在 `grafana` 字段下：
@@ -168,13 +148,11 @@ prometheusOperator:
         registry: docker.io
 ```
 
-替换后建议用[前文的临时 Pod 方法](#国内环境替换镜像地址)验证节点能否拉取。
-
 ### Overlay 集群：禁用 Admission Webhooks
 
 :::warning[仅 Overlay 网络的集群需要此配置]
 
-这里的 Overlay 指 **apiserver 无法直接路由到 Pod IP** 的场景，典型是：**自建 Cilium Overlay** 或**产品化的 Cilium Overlay（VPC-CNI 非共享网卡的 Overlay 模式）** 托管集群——apiserver 运行在管控面，无法路由到 overlay Pod IP（如 `10.244.x.x`），调用 webhook 会连接超时。
+这里的 Overlay 指 **apiserver 无法直接路由到 Pod IP** 的场景，典型是：**自建 Cilium Overlay** 或**产品化的 Cilium Overlay** 托管集群——apiserver 运行在管控面，无法路由到 overlay Pod IP（如 `10.244.x.x`），调用 webhook 会连接超时。
 
 普通 TKE 集群（Pod IP 是真实 VPC IP，apiserver 可直达 Pod）**不需要**本节配置，按上面正常启用 webhook 即可。
 
